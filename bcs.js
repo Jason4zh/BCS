@@ -13,6 +13,9 @@ class BallCollisionSimulator {
     this.currentShrinkStage = 0;
     this.maxShrinkStages = 5;
 
+    // 新增暂停状态
+    this.paused = false;
+
     this.knife = {
       img: options.knifeImage || null,
       x: 0,
@@ -48,7 +51,11 @@ class BallCollisionSimulator {
       color: null,
       hasKnife: false,
       firstmass: 6,
-      firstradius: 60
+      firstradius: 60,
+      isDead: false,        // 新增死亡标记
+      lastHitBy: null,      // 记录最后攻击者 id
+      birthTime: null,
+deathTime: null,
     };
 
     this.originalBoxSize = {
@@ -61,6 +68,13 @@ class BallCollisionSimulator {
     this.placeHeartRandomly();
   }
   
+  // ===== 暂停控制 =====
+  togglePause() {
+    this.paused = !this.paused;
+    return this.paused; // 返回当前状态（true 为暂停）
+  }
+
+  // ===== 原有方法（保留，部分内部调整） =====
   _setupCanvas() {
     this.ctx.fillStyle = 'white';
     this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
@@ -75,7 +89,6 @@ class BallCollisionSimulator {
 
   placeKnifeRandomly() {
     if (!this.knife.img) return;
-
     this.knife.x = Math.random() * (this.box.width - this.knife.width) + this.box.x;
     this.knife.y = Math.random() * (this.box.height - this.knife.height) + this.box.y;
     this.knife.available = true;
@@ -83,7 +96,6 @@ class BallCollisionSimulator {
 
   placeHeartRandomly() {
     if (!this.heart.img) return;
-
     this.heart.x = Math.random() * (this.box.width - this.heart.width) + this.box.x;
     this.heart.y = Math.random() * (this.box.height - this.heart.height) + this.box.y;
     this.heart.available = true;
@@ -91,7 +103,6 @@ class BallCollisionSimulator {
 
   _drawKnife() {
     if (!this.knife.img || !this.knife.available) return;
-
     this.ctx.drawImage(
       this.knife.img,
       this.knife.x,
@@ -103,7 +114,6 @@ class BallCollisionSimulator {
 
   _drawHeart() {
     if (!this.heart.img || !this.heart.available) return;
-
     this.ctx.drawImage(
       this.heart.img,
       this.heart.x,
@@ -113,6 +123,7 @@ class BallCollisionSimulator {
     );
   }
 
+  // ----- 工具碰撞（只针对活球） -----
   _checkToolCollision() {
     this._checkKnifeCollision();
     this._checkHeartCollision();
@@ -120,14 +131,13 @@ class BallCollisionSimulator {
 
   _checkKnifeCollision() {
     if (!this.knife.available || !this.knife.img) return;
-
     for (const ball of this.balls) {
+      if (ball.isDead) continue;
       const kX = Math.max(this.knife.x, Math.min(ball.x, this.knife.x + this.knife.width));
       const kY = Math.max(this.knife.y, Math.min(ball.y, this.knife.y + this.knife.height));
       const distkX = ball.x - kX;
       const distkY = ball.y - kY;
       const distancek = Math.sqrt(distkX * distkX + distkY * distkY);
-
       if (distancek <= ball.radius) {
         ball.hasKnife = true;
         this.knife.available = false;
@@ -138,14 +148,13 @@ class BallCollisionSimulator {
 
   _checkHeartCollision() {
     if (!this.heart.available || !this.heart.img) return;
-
     for (const ball of this.balls) {
+      if (ball.isDead) continue;
       const hX = Math.max(this.heart.x, Math.min(ball.x, this.heart.x + this.heart.width));
       const hY = Math.max(this.heart.y, Math.min(ball.y, this.heart.y + this.heart.height));
       const disthX = ball.x - hX;
       const disthY = ball.y - hY;
       const distanceh = Math.sqrt(disthX * disthX + disthY * disthY);
-
       if (distanceh <= ball.radius) {
         ball.mass = Math.min(ball.mass + 1, ball.firstmass);
         ball.radius = Math.min(ball.radius + 10, ball.firstradius);
@@ -158,11 +167,11 @@ class BallCollisionSimulator {
     }
   }
 
+  // ----- 球管理 -----
   addBall(config = {}) {
     const mergedConfig = { ...this.defaultBallConfig, ...config };
-
-    mergedConfig.firstmass = mergedConfig.mass
-    mergedConfig.firstradius = mergedConfig.radius
+    mergedConfig.firstmass = mergedConfig.mass;
+    mergedConfig.firstradius = mergedConfig.radius;
 
     if (mergedConfig.x === null) {
       mergedConfig.x = Math.random() * (this.box.width - 2 * mergedConfig.radius) +
@@ -172,18 +181,17 @@ class BallCollisionSimulator {
       mergedConfig.y = Math.random() * (this.box.height - 2 * mergedConfig.radius) +
         this.box.y + mergedConfig.radius;
     }
-
     if (mergedConfig.color === null) {
       mergedConfig.color = this.colors[this.balls.length % this.colors.length];
     }
 
     const id = this.balls.length + 1;
-    const ball = { ...mergedConfig, id };
-
+    const ball = { ...mergedConfig, id, isDead: false, birthTime: Date.now(), deathTime: null };
     this.balls.push(ball);
     return id;
   }
 
+  // 注意：removeBall 仍然会物理删除（若需要彻底移除）
   removeBall(id) {
     this.balls = this.balls.filter(ball => ball.id !== id);
   }
@@ -213,39 +221,47 @@ class BallCollisionSimulator {
     this.placeKnifeRandomly();
     this.placeHeartRandomly();
     this.currentShrinkStage = 0;
+    this.paused = false; // 重置暂停状态
   }
 
   _drawBalls() {
-    this.balls.forEach(ball => {
-      this.ctx.beginPath();
-      this.ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
-      this.ctx.fillStyle = ball.color;
-      this.ctx.fill();
-      this.ctx.strokeStyle = 'black';
-      this.ctx.lineWidth = 1;
-      this.ctx.stroke();
+  this.balls.forEach(ball => {
+    if (ball.isDead) return;
 
-      this.ctx.fillStyle = 'white';
-      this.ctx.font = 'bold 24px Arial';
-      this.ctx.textAlign = 'center';
-      this.ctx.textBaseline = 'middle';
-      this.ctx.fillText(ball.id.toString(), ball.x, ball.y);
+    this.ctx.beginPath();
+    this.ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+    this.ctx.fillStyle = ball.color;
+    this.ctx.fill();
+    this.ctx.strokeStyle = 'black';
+    this.ctx.lineWidth = 1;
+    this.ctx.stroke();
 
-      if (ball.hasKnife && this.knife.img) {
-        const knifeSize = ball.radius * 1.2;
-        this.ctx.drawImage(
-          this.knife.img,
-          ball.x + ball.radius * 0.2,
-          ball.y - knifeSize / 2,
-          knifeSize,
-          knifeSize
-        );
-      }
-    });
-  }
+    this.ctx.fillStyle = 'white';
+    this.ctx.font = 'bold 24px Arial';
+    this.ctx.textAlign = 'center';
+    this.ctx.textBaseline = 'middle';
+    this.ctx.fillText(ball.id.toString(), ball.x, ball.y);
 
+    if (ball.hasKnife && this.knife.img) {
+      const knifeSize = ball.radius * 1.2;
+      this.ctx.drawImage(
+        this.knife.img,
+        ball.x + ball.radius * 0.2,
+        ball.y - knifeSize / 2,
+        knifeSize,
+        knifeSize
+      );
+    }
+  });
+}
+
+  // ----- 物理更新（仅活球） -----
   _updateBalls() {
-    this.balls.forEach(ball => {
+    const alive = this.balls.filter(b => !b.isDead);
+    if (alive.length === 0) return;
+
+    // 位置更新 + 边界反弹
+    alive.forEach(ball => {
       ball.x += ball.vx;
       ball.y += ball.vy;
 
@@ -267,20 +283,18 @@ class BallCollisionSimulator {
       }
     });
 
-    this._detectBallCollisions();
-  }
-
-  _detectBallCollisions() {
-    for (let i = 0; i < this.balls.length; i++) {
-      for (let j = i + 1; j < this.balls.length; j++) {
-        const ball1 = this.balls[i];
-        const ball2 = this.balls[j];
+    // 活球之间的碰撞
+    for (let i = 0; i < alive.length; i++) {
+      for (let j = i + 1; j < alive.length; j++) {
+        const ball1 = alive[i];
+        const ball2 = alive[j];
 
         const dx = ball2.x - ball1.x;
         const dy = ball2.y - ball1.y;
         const distance = Math.sqrt(dx * dx + dy * dy);
 
         if (distance < ball1.radius + ball2.radius) {
+          // 处理小刀效果
           this._handleKnifeEffect(ball1, ball2);
 
           const angle = Math.atan2(dy, dx);
@@ -313,6 +327,7 @@ class BallCollisionSimulator {
   }
 
   _handleKnifeEffect(ball1, ball2) {
+    // 确保两个球都未死亡（调用前已过滤）
     if (ball1.hasKnife && !ball2.hasKnife) {
       ball2.mass = Math.max(0, ball2.mass - 1);
       ball2.radius = Math.max(0, ball2.radius - 10);
@@ -331,52 +346,64 @@ class BallCollisionSimulator {
     }
   }
 
+  // ----- 检测死亡并标记（不删除） -----
   _checkBallDie() {
     for (let i = 0; i < this.balls.length; i++) {
-      if (this.balls[i].radius <= 0) {
-        const deadBall = this.balls[i];
+      const ball = this.balls[i];
+      if (ball.isDead) continue;
+      if (ball.radius <= 0) {
+        ball.isDead = true;
+ball.deathTime = Date.now();  // 新增
+        // 触发击杀事件
         let killer = null;
-        if (deadBall.lastHitBy) {
-          killer = this.getBall(deadBall.lastHitBy);
+        if (ball.lastHitBy) {
+          killer = this.getBall(ball.lastHitBy);
         }
-
         if (killer) {
           this.killFeed.push({
             killerId: killer.id,
             killerColor: killer.color,
-            victimId: deadBall.id,
-            victimColor: deadBall.color,
+            victimId: ball.id,
+            victimColor: ball.color,
             time: new Date()
           });
-
           if (this.onKill) {
             this.onKill({
               killerId: killer.id,
               killerColor: killer.color,
-              victimId: deadBall.id,
-              victimColor: deadBall.color,
-              ballsNumber: this.balls.length - 1
+              victimId: ball.id,
+              victimColor: ball.color,
+              ballsNumber: this.balls.filter(b => !b.isDead).length // 活球数量
             });
           }
         }
-
-        this.balls.splice(i, 1);
-        i--;
       }
     }
   }
 
+  // ----- 动画循环（支持暂停） -----
   _animate() {
-    this.ctx.fillStyle = 'white';
-    this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-    this._drawBox();
-    this._updateBalls();
-    this._checkToolCollision();
-    this._drawKnife();
-    this._drawHeart();
-    this._drawBalls();
-    this._checkBallDie();
-
+    if (!this.paused) {
+      // 正常更新
+      this.ctx.fillStyle = 'white';
+      this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+      this._drawBox();
+      this._updateBalls();
+      this._checkToolCollision();
+      this._drawKnife();
+      this._drawHeart();
+      this._drawBalls();
+      this._checkBallDie();
+    } else {
+      // 暂停状态：只重绘当前帧（不更新物理）
+      this.ctx.fillStyle = 'white';
+      this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+      this._drawBox();
+      this._drawKnife();
+      this._drawHeart();
+      this._drawBalls();
+      // 注意：不调用 _updateBalls / _checkToolCollision / _checkBallDie
+    }
     this.animationId = requestAnimationFrame(() => this._animate());
   }
 
@@ -390,10 +417,15 @@ class BallCollisionSimulator {
     if (this.animationId) {
       cancelAnimationFrame(this.animationId);
       this.animationId = null;
-      clearInterval(this.interval)
+    }
+    // 移除可能遗留的 interval（如果有）
+    if (this.interval) {
+      clearInterval(this.interval);
+      this.interval = null;
     }
   }
 
+  // ----- 边界控制（未变） -----
   setBoxBoundary(x, y, width, height) {
     this.box = { x, y, width, height };
   }
@@ -433,7 +465,6 @@ class BallCollisionSimulator {
           this.box.x = centerX - newWidth / 2;
           break;
       }
-
       return [this.box.width, this.box.height];
     }
     return null;
@@ -463,7 +494,6 @@ class BallCollisionSimulator {
           this.box.x = centerX - newWidth / 2;
           break;
       }
-
       return [this.box.width, this.box.height];
     }
     return null;

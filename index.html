@@ -61,48 +61,62 @@
     let initialBallCount = 0;
     let gameStarted = false;
 
-    function updateBallStats() {
-      const tableBody = document.getElementById('ballStatsTable');
-      tableBody.innerHTML = '';
+function updateBallStats() {
+  const tableBody = document.getElementById('ballStatsTable');
+  tableBody.innerHTML = '';
 
-      const sortedBalls = simulator.getBalls().sort((a, b) => b.mass - a.mass);
-      const headers = ['编号', '颜色', '质量', '击杀数'];
+  const sortedBalls = simulator.getBalls().sort((a, b) => b.mass - a.mass);
+  const headers = ['编号', '颜色', '质量', '击杀数', '存活时间'];   // ← 新增列
 
-      headers.forEach((header, headerIndex) => {
-        const row = document.createElement('tr');
-        const th = document.createElement('th');
-        th.textContent = header;
-        row.appendChild(th);
-        
-        sortedBalls.forEach((ball) => {
-          if (killCounts[ball.id] === undefined) {
-            killCounts[ball.id] = 0;
+  headers.forEach((header, headerIndex) => {
+    const row = document.createElement('tr');
+    const th = document.createElement('th');
+    th.textContent = header;
+    row.appendChild(th);
+    
+    sortedBalls.forEach((ball) => {
+      if (killCounts[ball.id] === undefined) {
+        killCounts[ball.id] = 0;
+      }
+
+      const td = document.createElement('td');
+      
+      switch(headerIndex) {
+        case 0:
+          td.textContent = ball.id;
+          td.style.fontWeight = 'bold';
+          break;
+        case 1:
+          td.innerHTML = `<span class="color-indicator" style="background-color: ${ball.color};"></span>`;
+          break;
+        case 2:
+          if (ball.isDead) {
+            td.textContent = '已死亡';
+            td.style.color = '#999';
+          } else {
+            td.textContent = ball.mass;
           }
-
-          const td = document.createElement('td');
-          
-          switch(headerIndex) {
-            case 0:
-              td.textContent = ball.id;
-              td.style.fontWeight = 'bold';
-              break;
-            case 1:
-              td.innerHTML = `<span class="color-indicator" style="background-color: ${ball.color};"></span>`;
-              break;
-            case 2:
-              td.textContent = ball.mass;
-              break;
-            case 3:
-              td.textContent = killCounts[ball.id];
-              break;
+          break;
+        case 3:
+          td.textContent = killCounts[ball.id];
+          break;
+        case 4:   // ← 新增存活时间列
+          if (ball.birthTime) {
+            const now = ball.isDead ? ball.deathTime : Date.now();
+            const seconds = ((now - ball.birthTime) / 1000).toFixed(1);
+            td.textContent = seconds + 's';
+          } else {
+            td.textContent = '-';
           }
-          
-          row.appendChild(td);
-        });
-        
-        tableBody.appendChild(row);
-      });
-    }
+          break;
+      }
+      
+      row.appendChild(td);
+    });
+    
+    tableBody.appendChild(row);
+  });
+}
 
     simulator.onKill = (killInfo) => {
       const killFeedElement = document.getElementById('killFeed');
@@ -149,7 +163,7 @@
       updateBallStats();
     };
 
-    const t = (window.innerHeight - 100) * (window.innerWidth - 100) / 50000;
+    const t = (window.innerHeight - 100) * (window.innerWidth - 100) / 30000;
 
     const startBtn = document.getElementById('startBtn');
     const decreaseBtn = document.getElementById('decreaseBtn');
